@@ -2,7 +2,7 @@ package main
 
 import (
     "fmt"
-    "KEY_VALUE_STORE/tcp" 
+    "key-value-store/tcp" 
 )
 
 func main(){
