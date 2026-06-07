@@ -6,22 +6,37 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
-	"github.com/joho/godotenv"
+	"key-value-store/config"
 )
-var connLimiter = make(chan struct{}, 100)
+var connLimiter = make(chan struct{}, 10)
+var wg sync.WaitGroup
 
 func StartTCP(){
-	err:= godotenv.Load()
-	if err!=nil {
-		log.Fatal("Error loading .env file")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("configuration error: %v", err)
 	}
-	port := os.Getenv("PORT")
+	port := cfg.Port
 	l, err := net.Listen("tcp",port) 
 	if err != nil {
-        log.Fatalf("error creating listener: %v", err)
+        log.Printf("error creating listener: %v", err)
     }
+
+	sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func(){
+		 <-sigChan
+        log.Println("shutting down")
+        l.Close() 
+	}()
+
+
 
     defer l.Close()
 	log.Printf("server listening on %s", port)
@@ -29,30 +44,37 @@ func StartTCP(){
 	for{
 		conn, err := l.Accept();
 		if err!=nil{
-			log.Printf("accept error: %v", err)
-			continue;
+			log.Printf("listener closed, waiting for connections to drain")
+			break;
 		}
+		wg.Add(1)
 		connLimiter <- struct{}{}
 		go handleConnection(conn);
 	}
+	wg.Wait();
 }
 func handleConnection(conn net.Conn){
 	defer func(){
 		conn.Close();
+		wg.Done()
 		<- connLimiter
 	} ()
+
 	const maxMessageSize = 4 * 1024
 	scanner := bufio.NewScanner(conn)
 	buff := make([]byte, maxMessageSize)
 	scanner.Buffer(buff, maxMessageSize)
 	
-    
 	for{
 		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 		if !scanner.Scan() {
 			if err := scanner.Err(); err != nil {
-				log.Printf("Read error: %v", err)
+				if err == bufio.ErrTooLong{
+					log.Printf("message exceeds %d bytes, closing connection", maxMessageSize)
+				}else{
+					log.Printf("Read error: %v", err)
+				}	
 			} else {
 				log.Printf("Client %s disconnected", conn.RemoteAddr())
 			}
@@ -65,6 +87,7 @@ func handleConnection(conn net.Conn){
 		_, err := conn.Write([]byte(response))
 		if err != nil {
 			log.Printf("Server write error: %v", err)
+			return;
 		}
 	}
 }
