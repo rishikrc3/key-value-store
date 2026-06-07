@@ -1,8 +1,13 @@
 package main 
+
 import (
-	"fmt"
+    "fmt"
+    "key-value-store/tcp" 
+	
 )
 
 func main(){
-	fmt.Printf("Hello World")
+    fmt.Println("Hello World")
+
+    tcp.StartTCP()
 }
